@@ -1,0 +1,22 @@
+Tree model: empty diagram is root, siblings are and-ed together
+Clicking on an element selects the subtree rooted there
+
+m: toggle mode
+
+Erasure/Insertion:
+d: delete (any even level graph; deleted graph may be pasted)
+i: insert (add arbitrary child within odd level)
+
+Iteration/Deiteration:
+x: cut (can be pasted; sometimes must be pasted)
+y: yank/copy 
+p: paste 
+
+Double Cut:
+C: enclose with double cut
+c: remove double cut (if top two nodes are cuts)
+
+Insert:
+a: append (click anywhere and type identifier)
+C: add cut around selection
+d: delete (any graph)
