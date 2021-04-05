@@ -53,6 +53,7 @@ static void alpha_rehash(struct alpha_node *ap); /* goes up tree */
 static int alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr);
 static int alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p);
 static int alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p);
+static int alpha_paste_norehash(struct alpha_node *target, struct alpha_node *to_paste);
 
 /* TODO root is not NULL; root's parent is NULL but there should be only one
  * root */
@@ -186,9 +187,41 @@ int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste) {
   return alpha_chkpaste(target->parent, to_paste);
 }
 
+/* Create a copy of the tree rooted at to_paste as a child of target */
+static int alpha_paste_norehash(struct alpha_node *target, 
+    struct alpha_node *to_paste) {
+  if (!target || !to_paste) {
+    return ALPHA_RET_INVALID;
+  }
+
+  if (target->type == ALPHA_TYPE_PROP) {
+    return ALPHA_RET_INVALID;
+  }
+  
+  /* TODO catch when malloc fails */
+  struct alpha_node *newnode = alpha_makenode_norehash(target, 
+      to_paste->name, to_paste->type);
+  alpha_sibpush(&(target->children), newnode);
+  for (size_t i = 0; i < to_paste->children.num_sibs; ++i) {
+    alpha_paste_norehash(newnode, to_paste->children.sibs[i]);
+  }
+
+  return ALPHA_RET_OK;
+}
+
+int alpha_paste(struct alpha_node *target, 
+    struct alpha_node *to_paste) {
+  int ret = alpha_paste_norehash(target, to_paste);
+  if (ret != ALPHA_RET_OK) {
+    return ret;
+  }
+  alpha_rehash(target);
+  return ret;
+}
+
 /* Check if the tree rooted at this node can be removed via deiteration */
 int alpha_chkdeiter(struct alpha_node *ap) {
-  if (!ap) {
+  if (!ap || !(ap->parent)) {
     return ALPHA_RET_INVALID;
   }
   return alpha_recurmatch(ap->parent, ap);
