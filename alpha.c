@@ -54,6 +54,9 @@ static int alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr);
 static int alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p);
 static int alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p);
 
+/* TODO root is not NULL; root's parent is NULL but there should be only one
+ * root */
+
 static struct alpha_node *alpha_makenode_norehash(struct alpha_node *parent,
   const char *name, int type) {
 
@@ -191,12 +194,69 @@ int alpha_chkdeiter(struct alpha_node *ap) {
   return alpha_recurmatch(ap->parent, ap);
 }
 
-/* TODO remove and add double negatives, returning the pre-existing child 
- * whose parentage has been affected by the operation */
-struct alpha_node *alpha_remdneg(struct alpha_node *ap) {
+/* remove a double cut, where ap is the outermost cut */
+int alpha_remdneg(struct alpha_node *ap) {
+  if (!ap) {
+    return ALPHA_RET_INVALID;
+  }
+
+  if (ap->type != ALPHA_TYPE_CUT) {
+    return ALPHA_RET_INVALID;
+  }
+
+  struct alpha_node *parent = ap->parent;
+  if (!parent) {
+    return ALPHA_RET_INVALID;
+  }
+
+  if (ap->children.num_sibs != 1) {
+    return ALPHA_RET_INVALID;
+  }
+
+  struct alpha_node *child = ap->children.sibs[0];
+
+  if (!child) {
+    return ALPHA_RET_INVALID;
+  }
+
+  if (child->type != ALPHA_TYPE_CUT) {
+    return ALPHA_RET_INVALID;
+  }
+  
+  /* TODO: create a temporary object and push into it first; right now this is a
+   * fatal error */
+  for (size_t i = 0; i < child->children.num_sibs; ++i) {
+    if (alpha_sibpush(&(parent->children), child->children.sibs[i]) == ALPHA_RET_NOMEM) {
+      return ALPHA_RET_FATAL;
+    }
+  }
+  child->children.num_sibs = 0; /* tricks cleanup code into not deleting the children */
+  alpha_delnode(ap);
+
+  return ALPHA_RET_OK;
 }
 
+/* add a double negative around ap, returning the outermost cut */
 struct alpha_node *alpha_adddneg(struct alpha_node *ap) {
+  if (!ap || !ap->parent) {
+    return NULL; /* invalid */
+  }
+  
+  struct alpha_node *parent = ap->parent;
+  /* TODO catch if malloc fails */
+  struct alpha_node *outcut = alpha_makenode_norehash(parent, NULL, ALPHA_TYPE_CUT);
+  struct alpha_node *incut = alpha_makenode_norehash(outcut, NULL, ALPHA_TYPE_CUT);
+  for (size_t i = 0; i < parent->children.num_sibs; ++i) {
+    if (parent->children.sibs[i] == ap) {
+      parent->children.sibs[i] = outcut;
+    }
+  }
+
+  ap->parent = incut;
+  alpha_sibpush(&(incut->children), ap);
+  alpha_rehash(incut);
+  alpha_upddepth(ap, incut->depth + 1);
+  return outcut;
 }
 
 /* Recompute the hash of ap and all its ancestors. The hash of a PROP
@@ -229,7 +289,7 @@ switch (ap->type) {
     }
     ap->hash = newhash;
     break;
-}
+  }
 
   alpha_rehash(ap->parent);
 }

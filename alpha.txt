@@ -6,6 +6,7 @@ m: toggle mode
 Erasure/Insertion:
 d: delete (any even level graph; deleted graph may be pasted)
 i: insert (add arbitrary child within odd level)
+(check logic in front end)
 
 Iteration/Deiteration:
 x: cut (can be pasted; sometimes must be pasted)

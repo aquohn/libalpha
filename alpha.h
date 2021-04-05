@@ -19,6 +19,7 @@ extern "C" {
 #define ALPHA_TYPE_PROP 2
 
 #define ALPHA_RET_OK 1
+#define ALPHA_RET_FATAL 0
 #define ALPHA_RET_INVALID -1
 #define ALPHA_RET_NOTFOUND -2
 #define ALPHA_RET_NOMEM -3
@@ -45,10 +46,11 @@ struct alpha_node {
 struct alpha_node *alpha_makenode(struct alpha_node *parent,
   const char *name, int type);
 void alpha_deltree(struct alpha_node *ap);
+int alpha_paste(struct alpha_node *target, struct alpha_node *to_paste);
 int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste);
 int alpha_chkdeiter(struct alpha_node *ap);
 
-struct alpha_node *alpha_remdneg(struct alpha_node *ap);
+int alpha_remdneg(struct alpha_node *ap);
 struct alpha_node *alpha_adddneg(struct alpha_node *ap);
 
 #ifdef __cplusplus
