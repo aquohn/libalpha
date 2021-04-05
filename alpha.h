@@ -44,10 +44,12 @@ struct alpha_node {
 
 struct alpha_node *alpha_makenode(struct alpha_node *parent,
   const char *name, int type);
-
 void alpha_deltree(struct alpha_node *ap);
 int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste);
 int alpha_chkdeiter(struct alpha_node *ap);
+
+struct alpha_node *alpha_remdneg(struct alpha_node *ap);
+struct alpha_node *alpha_adddneg(struct alpha_node *ap);
 
 #ifdef __cplusplus
 }
