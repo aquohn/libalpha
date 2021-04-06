@@ -4,7 +4,7 @@
 
 #include "alpha.h"
 
-static int alpha_sibpush(struct alpha_siblist *siblist, struct alpha_node *ap) {
+static alpha_ret_t alpha_sibpush(struct alpha_siblist *siblist, struct alpha_node *ap) {
   siblist->sibs[siblist->num_sibs] = ap; 
 
   if (siblist->num_sibs + 1 >= siblist->len) {
@@ -20,7 +20,7 @@ static int alpha_sibpush(struct alpha_siblist *siblist, struct alpha_node *ap) {
   return ALPHA_RET_OK;
 }
 
-static int alpha_sibpop(struct alpha_siblist *siblist, struct alpha_node *ap) {
+static alpha_ret_t alpha_sibpop(struct alpha_siblist *siblist, struct alpha_node *ap) {
   size_t i;
   for (i = 0; i < siblist->num_sibs; ++i) {
     if (ap == siblist->sibs[i]) {
@@ -48,56 +48,62 @@ static int alpha_sibpop(struct alpha_siblist *siblist, struct alpha_node *ap) {
   return ALPHA_RET_OK;
 }
 
-static void alpha_upddepth(struct alpha_node *ap, int depth); /* goes down tree */
+static void alpha_upddepth(struct alpha_node *ap, size_t depth); /* goes down tree */
 static void alpha_rehash(struct alpha_node *ap); /* goes up tree */
-static int alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr);
-static int alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p);
-static int alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p);
-static int alpha_paste_norehash(struct alpha_node *target, struct alpha_node *to_paste);
+static alpha_ret_t alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr);
+static alpha_ret_t alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p);
+static alpha_ret_t alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p);
+static alpha_ret_t alpha_paste_norehash(struct alpha_node *target, struct alpha_node *to_paste);
 
 /* TODO root is not NULL; root's parent is NULL but there should be only one
  * root */
 
 static struct alpha_node *alpha_makenode_norehash(struct alpha_node *parent,
-  const char *name, int type) {
+    const char *name, int type, alpha_ret_t *retp) {
 
-  /* bare propositions should not have children */
-  if (parent) {
-    if (parent->type == ALPHA_TYPE_PROP) {
-      return NULL;
-    }
-  }
-  
   char *namebuf = NULL;
   struct alpha_node *ap = NULL;
   struct alpha_node **sibs = NULL;
 
+  /* bare propositions should not have children */
+  if (parent) {
+    if (parent->type == ALPHA_TYPE_PROP) {
+      *retp = ALPHA_RET_INVALID;
+      goto makenode_exc;
+    }
+  }
+
   /* propositions must have names */
   if (type == ALPHA_TYPE_PROP) {
     if (!name) {
-      return NULL;
+      *retp = ALPHA_RET_INVALID;
+      goto makenode_exc;
     }
 
     size_t namelen = strnlen(name, ALPHA_STR_MAXLEN);
     if (namelen >= ALPHA_STR_MAXLEN) {
-      return NULL;
+      *retp = ALPHA_RET_INVALID;
+      goto makenode_exc;
     } else {
       namebuf = malloc(namelen * sizeof(char));
       if (!namebuf) {
-        return NULL;
+        *retp = ALPHA_RET_INVALID;
+        goto makenode_exc;
       }
     }
-    
+
     strncpy(namebuf, name, namelen);
-  } else {
+  } else { /* propositions cannot have children */
     sibs = malloc(ALPHA_VEC_SIZE * sizeof(struct alpha_node *));
     if (!sibs) {
+      *retp = ALPHA_RET_NOMEM;
       goto makenode_exc;
     }
   }
 
   ap = malloc(sizeof(struct alpha_node));
   if (!ap) {
+    *retp = ALPHA_RET_NOMEM;
     goto makenode_exc;
   }
 
@@ -106,10 +112,11 @@ static struct alpha_node *alpha_makenode_norehash(struct alpha_node *parent,
   } else {
     ap->depth = parent->depth + 1;
     if (alpha_sibpush(&(parent->children), ap) != ALPHA_RET_OK) {
+      *retp = ALPHA_RET_NOMEM;
       goto makenode_exc;
     }
   }
-   
+
   ap->children.num_sibs = 0;
   /* NOTE potential gotcha: sibs is NULL for ALPHA_TYPE_PROP. Functions here
    * are careful to avoid dereferencing it unless it cannot be ALPHA_TYPE_PROP,
@@ -119,6 +126,7 @@ static struct alpha_node *alpha_makenode_norehash(struct alpha_node *parent,
   ap->name = namebuf;
   ap->type = type;
   alpha_rehash(ap);
+  *retp = ALPHA_RET_OK;
   return ap;
 
 makenode_exc: free(namebuf);
@@ -128,8 +136,8 @@ makenode_exc: free(namebuf);
 }
 
 struct alpha_node *alpha_makenode(struct alpha_node *parent,
-  const char *name, int type) {
-  struct alpha_node *ap = alpha_makenode_norehash(parent, name, type);
+    const char *name, alpha_type_t type, alpha_ret_t *retp) {
+  struct alpha_node *ap = alpha_makenode_norehash(parent, name, type, retp);
   if (!ap) {
     return NULL;
   } else {
@@ -154,7 +162,7 @@ void alpha_delnode(struct alpha_node *ap) {
   if (!ap) return;
 
   if (ap->parent) {
-    alpha_sibpop(&(ap->children), ap);
+    alpha_sibpop(&(ap->parent->children), ap);
   }
 
   alpha_delnode_nopop(ap);
@@ -162,12 +170,12 @@ void alpha_delnode(struct alpha_node *ap) {
 
 /* Check if pasting the tree rooted at to_paste as a child of target would be a
  * valid exercise of the iteration rule. */
-int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste) {
-  /* not possible to paste the whole tree */
+alpha_ret_t alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste) {
+  /* there must be a root node */
   if (!to_paste) {
     return ALPHA_RET_INVALID;
   }
-  
+
   /* cannot paste a diagram within itself */
   if (target == to_paste) {
     return ALPHA_RET_INVALID;
@@ -177,41 +185,50 @@ int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste) {
   if (target == to_paste->parent) {
     return ALPHA_RET_OK;
   }
-  
+
   /* NULL has no parents; either we succeed before reaching here or we fail */
   if (!target) {
     return ALPHA_RET_INVALID;
   }
-  
+
   /* recurse and check the parent of this target */
   return alpha_chkpaste(target->parent, to_paste);
 }
 
-/* Create a copy of the tree rooted at to_paste as a child of target */
-static int alpha_paste_norehash(struct alpha_node *target, 
+/* Create a copy of the tree rooted at to_paste as a child of target;
+ * validity must be checked by the caller */
+static alpha_ret_t alpha_paste_norehash(struct alpha_node *target, 
     struct alpha_node *to_paste) {
-  if (!target || !to_paste) {
+  alpha_ret_t ret;
+  if (!to_paste) {
     return ALPHA_RET_INVALID;
   }
 
-  if (target->type == ALPHA_TYPE_PROP) {
-    return ALPHA_RET_INVALID;
-  }
-  
-  /* TODO catch when malloc fails */
+  /* TODO have an outer function delete everything created on failure */
   struct alpha_node *newnode = alpha_makenode_norehash(target, 
-      to_paste->name, to_paste->type);
-  alpha_sibpush(&(target->children), newnode);
-  for (size_t i = 0; i < to_paste->children.num_sibs; ++i) {
-    alpha_paste_norehash(newnode, to_paste->children.sibs[i]);
+      to_paste->name, to_paste->type, &ret);
+  if (ret != ALPHA_RET_OK) {
+    ret = ALPHA_RET_FATAL;
+    goto paste_exc;
   }
-
-  return ALPHA_RET_OK;
+  ret = alpha_sibpush(&(target->children), newnode);
+  if (ret != ALPHA_RET_OK) {
+    ret = ALPHA_RET_FATAL;
+    goto paste_exc;
+  }
+  for (size_t i = 0; i < to_paste->children.num_sibs; ++i) {
+    ret = alpha_paste_norehash(newnode, to_paste->children.sibs[i]);
+    if (ret != ALPHA_RET_OK) {
+      ret = ALPHA_RET_FATAL;
+      goto paste_exc;
+    }
+  }
+paste_exc: return ret;
 }
 
-int alpha_paste(struct alpha_node *target, 
+alpha_ret_t alpha_paste(struct alpha_node *target, 
     struct alpha_node *to_paste) {
-  int ret = alpha_paste_norehash(target, to_paste);
+  alpha_ret_t ret = alpha_paste_norehash(target, to_paste);
   if (ret != ALPHA_RET_OK) {
     return ret;
   }
@@ -220,7 +237,7 @@ int alpha_paste(struct alpha_node *target,
 }
 
 /* Check if the tree rooted at this node can be removed via deiteration */
-int alpha_chkdeiter(struct alpha_node *ap) {
+alpha_ret_t alpha_chkdeiter(struct alpha_node *ap) {
   if (!ap || !(ap->parent)) {
     return ALPHA_RET_INVALID;
   }
@@ -228,7 +245,7 @@ int alpha_chkdeiter(struct alpha_node *ap) {
 }
 
 /* remove a double cut, where ap is the outermost cut */
-int alpha_remdneg(struct alpha_node *ap) {
+alpha_ret_t alpha_remdneg(struct alpha_node *ap) {
   if (!ap) {
     return ALPHA_RET_INVALID;
   }
@@ -255,7 +272,7 @@ int alpha_remdneg(struct alpha_node *ap) {
   if (child->type != ALPHA_TYPE_CUT) {
     return ALPHA_RET_INVALID;
   }
-  
+
   /* TODO: create a temporary object and push into it first; right now this is a
    * fatal error */
   for (size_t i = 0; i < child->children.num_sibs; ++i) {
@@ -271,17 +288,20 @@ int alpha_remdneg(struct alpha_node *ap) {
 
 /* add a double negative around ap, returning the outermost cut */
 struct alpha_node *alpha_adddneg(struct alpha_node *ap) {
-  if (!ap || !ap->parent) {
-    return NULL; /* invalid */
+  if (!ap) {
+    return NULL; /* cannot add things above NULL */
   }
-  
+
   struct alpha_node *parent = ap->parent;
   /* TODO catch if malloc fails */
-  struct alpha_node *outcut = alpha_makenode_norehash(parent, NULL, ALPHA_TYPE_CUT);
-  struct alpha_node *incut = alpha_makenode_norehash(outcut, NULL, ALPHA_TYPE_CUT);
-  for (size_t i = 0; i < parent->children.num_sibs; ++i) {
-    if (parent->children.sibs[i] == ap) {
-      parent->children.sibs[i] = outcut;
+  alpha_ret_t ret;
+  struct alpha_node *outcut = alpha_makenode_norehash(parent, NULL, ALPHA_TYPE_CUT, &ret);
+  struct alpha_node *incut = alpha_makenode_norehash(outcut, NULL, ALPHA_TYPE_CUT, &ret);
+  if (parent) {
+    for (size_t i = 0; i < parent->children.num_sibs; ++i) {
+      if (parent->children.sibs[i] == ap) {
+        parent->children.sibs[i] = outcut;
+      }
     }
   }
 
@@ -302,35 +322,35 @@ static void alpha_rehash(struct alpha_node *ap) {
   }
 
   hash_t newhash = 0;
-  
+
   for (size_t i = 0; i < ap->children.num_sibs; ++i) {
     newhash ^= ap->children.sibs[i]->hash;
   }
 
-switch (ap->type) {
-  case ALPHA_TYPE_CUT:
-    ap->hash = ~newhash + 1;
-    break;
-  case ALPHA_TYPE_AND:
-    ap->hash = newhash * ap->children.num_sibs;
-    break;
-  case ALPHA_TYPE_PROP:
-    /* djb2 hash: http://www.cse.yorku.ca/~oz/hash.html */
-    newhash = 5381;
-    for (size_t i = 0; ap->name[i]; ++i) {
-      newhash = (newhash << 5) + newhash + ap->name[i];
-    }
-    ap->hash = newhash;
-    break;
+  switch (ap->type) {
+    case ALPHA_TYPE_CUT:
+      ap->hash = ~newhash + 1;
+      break;
+    case ALPHA_TYPE_AND:
+      ap->hash = newhash * ap->children.num_sibs;
+      break;
+    case ALPHA_TYPE_PROP:
+      /* djb2 hash: http://www.cse.yorku.ca/~oz/hash.html */
+      newhash = 5381;
+      for (size_t i = 0; ap->name[i]; ++i) {
+        newhash = (newhash << 5) + newhash + ap->name[i];
+      }
+      ap->hash = newhash;
+      break;
   }
 
   alpha_rehash(ap->parent);
 }
 
 /* Update a node's depth after its parent's depth has been updated */
-static void alpha_upddepth(struct alpha_node *ap, int depth) {
+static void alpha_upddepth(struct alpha_node *ap, size_t depth) {
   if (!ap) return;
-  ap->depth = 1;
+  ap->depth = depth;
   for (size_t i = 0; i < ap->children.num_sibs; ++i) {
     alpha_upddepth(ap->children.sibs[i], depth + 1);
   }
@@ -338,9 +358,11 @@ static void alpha_upddepth(struct alpha_node *ap, int depth) {
 
 /* Recursively check if there is a node structurally identical to target 
  * rooted at curr or any descendant thereof */
-static int alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr) {
+static alpha_ret_t alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr) {
   if (alpha_matchnode(curr, target) == ALPHA_RET_OK) {
     return ALPHA_RET_OK;
+  } else if (!curr || !target) {
+    return ALPHA_RET_INVALID;
   }
 
   for (size_t i = 0; i < curr->children.num_sibs; ++i) {
@@ -353,7 +375,7 @@ static int alpha_recurmatch(struct alpha_node *target, struct alpha_node *curr) 
 }
 
 /* Check if the trees rooted at two nodes are structurally identical */
-static int alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p) {
+static alpha_ret_t alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p) {
   if ((a1p && !a2p) || (!a1p && a2p)) {
     return ALPHA_RET_INVALID;
   } else if (!a1p && !a2p) {
@@ -367,73 +389,73 @@ static int alpha_matchnode(struct alpha_node *a1p, struct alpha_node *a2p) {
   if (a1p->hash != a2p->hash) {
     return ALPHA_RET_INVALID;
   }
-  
+
   switch (a1p->type) {
-  case ALPHA_TYPE_CUT: /* fallthrough */
-  case ALPHA_TYPE_AND: 
-    return alpha_matchconj(a1p, a2p);
-    break;
-  case ALPHA_TYPE_PROP:
-    if (strncmp(a1p->name, a2p->name, ALPHA_STR_MAXLEN) == 0) {
-      return ALPHA_RET_OK;
-    } else {
+    case ALPHA_TYPE_CUT: /* fallthrough */
+    case ALPHA_TYPE_AND: 
+      return alpha_matchconj(a1p, a2p);
+      break;
+    case ALPHA_TYPE_PROP:
+      if (strncmp(a1p->name, a2p->name, ALPHA_STR_MAXLEN) == 0) {
+        return ALPHA_RET_OK;
+      } else {
+        return ALPHA_RET_INVALID;
+      }
+      break;
+    default:
       return ALPHA_RET_INVALID;
-    }
-    break;
-  default:
-    return ALPHA_RET_INVALID;
   }
 }
 
-static int alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p) {
-    /* no time to implement hash based indexing; just use hash to speed up checks */
-    int ret = ALPHA_RET_OK;
-    size_t num_sibs1 = a1p->children.num_sibs;
-    size_t num_sibs2 = a2p->children.num_sibs;
+static alpha_ret_t alpha_matchconj(struct alpha_node *a1p, struct alpha_node *a2p) {
+  /* no time to implement hash based indexing; just use hash to speed up checks */
+  alpha_ret_t ret = ALPHA_RET_OK;
+  size_t num_sibs1 = a1p->children.num_sibs;
+  size_t num_sibs2 = a2p->children.num_sibs;
 
-    if (num_sibs1 == 0 && num_sibs2 == 0) {
-      return ALPHA_RET_OK;
-    }
+  if (num_sibs1 == 0 && num_sibs2 == 0) {
+    return ALPHA_RET_OK;
+  }
 
-    if (num_sibs1 != num_sibs2) {
-      return ALPHA_RET_INVALID;
-    }
-    
-    /* create local copy of pointers to a2p's children */
-    int copy_succeeded = 0;
-    struct alpha_node **sibs2 = malloc(num_sibs2 * sizeof(struct alpha_node *));
-    if (!sibs2) {
-      sibs2 = a2p->children.sibs;
-    } else {
-      copy_succeeded = 1;
-      memcpy(sibs2, a2p->children.sibs, num_sibs2 * sizeof(struct alpha_node *));
-    }
+  if (num_sibs1 != num_sibs2) {
+    return ALPHA_RET_INVALID;
+  }
 
-    for (size_t i = 0; i < num_sibs1; ++i) {
-      struct alpha_node *curr1 = a1p->children.sibs[i];
-      struct alpha_node *curr2 = NULL;
-      for (size_t j = 0; j < num_sibs2; ++j) {
-        if (!sibs2[j]) {
-          continue;
-        }
+  /* create local copy of pointers to a2p's children */
+  int copy_succeeded = 0;
+  struct alpha_node **sibs2 = malloc(num_sibs2 * sizeof(struct alpha_node *));
+  if (!sibs2) {
+    sibs2 = a2p->children.sibs;
+  } else {
+    copy_succeeded = 1;
+    memcpy(sibs2, a2p->children.sibs, num_sibs2 * sizeof(struct alpha_node *));
+  }
 
-        if (curr1->hash == sibs2[j]->hash && alpha_matchnode(curr1, sibs2[j])) {
-          curr2 = sibs2[j];
-          /* mark nodes already used as NULL */
-          if (copy_succeeded) {
-            sibs2[j] = NULL;
-          }
-          break;
-        }
+  for (size_t i = 0; i < num_sibs1; ++i) {
+    struct alpha_node *curr1 = a1p->children.sibs[i];
+    struct alpha_node *curr2 = NULL;
+    for (size_t j = 0; j < num_sibs2; ++j) {
+      if (!sibs2[j]) {
+        continue;
       }
-      if (!curr2) {
-        ret = ALPHA_RET_INVALID;
+
+      if (curr1->hash == sibs2[j]->hash && alpha_matchnode(curr1, sibs2[j])) {
+        curr2 = sibs2[j];
+        /* mark nodes already used as NULL */
+        if (copy_succeeded) {
+          sibs2[j] = NULL;
+        }
         break;
       }
     }
-
-    if (copy_succeeded) {
-      free(sibs2);
+    if (!curr2) {
+      ret = ALPHA_RET_INVALID;
+      break;
     }
-    return ret;
+  }
+
+  if (copy_succeeded) {
+    free(sibs2);
+  }
+  return ret;
 }

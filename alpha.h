@@ -25,6 +25,8 @@ extern "C" {
 #define ALPHA_RET_NOMEM -3
 
 typedef uint64_t hash_t;
+typedef int alpha_ret_t;
+typedef int alpha_type_t;
 struct alpha_node;
 struct alpha_siblist;
 
@@ -38,19 +40,19 @@ struct alpha_node {
   struct alpha_node *parent;
   struct alpha_siblist children;
   char *name;
-  int type;
+  alpha_type_t type;
   size_t depth;
   hash_t hash;
 };
 
 struct alpha_node *alpha_makenode(struct alpha_node *parent,
-  const char *name, int type);
+  const char *name, alpha_type_t type, alpha_ret_t *retp);
 void alpha_deltree(struct alpha_node *ap);
-int alpha_paste(struct alpha_node *target, struct alpha_node *to_paste);
-int alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste);
-int alpha_chkdeiter(struct alpha_node *ap);
+alpha_ret_t alpha_paste(struct alpha_node *target, struct alpha_node *to_paste);
+alpha_ret_t alpha_chkpaste(struct alpha_node *target, struct alpha_node *to_paste);
+alpha_ret_t alpha_chkdeiter(struct alpha_node *ap);
 
-int alpha_remdneg(struct alpha_node *ap);
+alpha_ret_t alpha_remdneg(struct alpha_node *ap);
 struct alpha_node *alpha_adddneg(struct alpha_node *ap);
 
 #ifdef __cplusplus
