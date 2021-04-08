@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #ifndef ALPHA_STR_MAXLEN
-#define ALPHA_STR_MAXLEN 50
+#define ALPHA_STR_MAXLEN 64
 #endif
 #ifndef ALPHA_VEC_SIZE
 #define ALPHA_VEC_SIZE 16
@@ -52,6 +52,7 @@ void alpha_delnode(struct alpha_node *ap);
 alpha_ret_t alpha_prfinsert(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_prferase(struct alpha_node *target);
 
+alpha_ret_t alpha_move(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_paste(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_chkiter(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_chkdeiter(struct alpha_node *ap);

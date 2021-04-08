@@ -97,6 +97,8 @@ alpha_ret_t alpha_chkdeiter(struct alpha_node *ap) {
   return alpha_recurmatch(ap->parent, ap);
 }
 
+/* construct a tree structurally identical to the one rooted at content,
+ * rooting content's clone at target */
 alpha_ret_t alpha_paste(struct alpha_node *target, 
     struct alpha_node *content) {
   alpha_ret_t ret = alpha_paste_norehash(target, content);
@@ -107,6 +109,38 @@ alpha_ret_t alpha_paste(struct alpha_node *target,
   alpha_rehash(target);
   return ret;
 }
+
+/* move a subtree rooted at content, rooting content at target */
+alpha_ret_t alpha_move(struct alpha_node *target, 
+    struct alpha_node *content) {
+
+  alpha_ret_t ret;
+  if (!content || !target) {
+    /* subtree root must exist, and cannot change root conjunction */
+    ret = ALPHA_RET_INVALID;
+    goto move_exc;
+  }
+  
+  if (target->type == ALPHA_TYPE_PROP) {
+    ret = ALPHA_RET_INVALID;
+    goto move_exc;
+  }
+
+  /* TODO handle errors */
+  struct alpha_node *oldparent = content->parent;
+  alpha_sibpush(&(target->children), content);
+  if (oldparent) {
+    alpha_sibpop(&(oldparent->children), content);
+  }
+  content->parent = target;
+  
+  alpha_upddepth(content, target->depth);
+  alpha_rehash(target);
+  ret = ALPHA_RET_OK;
+
+move_exc: return ret;
+}
+
 
 /* remove a double cut, where ap is the outermost cut */
 alpha_ret_t alpha_remdneg(struct alpha_node *ap) {
@@ -140,8 +174,11 @@ alpha_ret_t alpha_remdneg(struct alpha_node *ap) {
   /* TODO: create a temporary object and push into it first; right now this is a
    * fatal error */
   for (size_t i = 0; i < child->children.num_sibs; ++i) {
-    if (alpha_sibpush(&(parent->children), child->children.sibs[i]) == ALPHA_RET_NOMEM) {
+    struct alpha_node *grandchild = child->children.sibs[i];
+    if (alpha_sibpush(&(parent->children), grandchild) == ALPHA_RET_NOMEM) {
       return ALPHA_RET_FATAL;
+    } else {
+      grandchild->parent = parent;
     }
   }
   child->children.num_sibs = 0; /* tricks cleanup code into not deleting the children */
@@ -150,13 +187,17 @@ alpha_ret_t alpha_remdneg(struct alpha_node *ap) {
   return ALPHA_RET_OK;
 }
 
-/* add a double negative around ap, returning the outermost cut */
+/* add a double negative around ap, returning the parent of the outermost cut */
 struct alpha_node *alpha_adddneg(struct alpha_node *ap) {
   if (!ap) {
     return NULL; /* NULL cannot be a child */
   }
 
   struct alpha_node *parent = ap->parent;
+  if (!parent) {
+    return NULL; /* cannot negate root element */
+  }
+
   /* TODO catch if malloc fails */
   alpha_ret_t ret;
   struct alpha_node *outcut = alpha_makenode_norehash(parent, NULL, ALPHA_TYPE_CUT, &ret);
@@ -172,8 +213,8 @@ struct alpha_node *alpha_adddneg(struct alpha_node *ap) {
   ap->parent = incut;
   alpha_sibpush(&(incut->children), ap);
   alpha_rehash(incut);
-  alpha_upddepth(ap, incut->depth + 1);
-  return outcut;
+  alpha_upddepth(ap, incut->depth);
+  return parent;
 }
 
 /* Static functions */
