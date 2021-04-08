@@ -49,16 +49,17 @@ struct alpha_node *alpha_makenode(struct alpha_node *parent,
   const char *name, alpha_type_t type, alpha_ret_t *retp);
 void alpha_delnode(struct alpha_node *ap);
 
+alpha_ret_t alpha_move(struct alpha_node *target, struct alpha_node *content);
+alpha_ret_t alpha_reparent(struct alpha_node *target, struct alpha_node *content);
+alpha_ret_t alpha_paste(struct alpha_node *target, struct alpha_node *content);
+
 alpha_ret_t alpha_prfinsert(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_prferase(struct alpha_node *target);
-
-alpha_ret_t alpha_move(struct alpha_node *target, struct alpha_node *content);
-alpha_ret_t alpha_paste(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_chkiter(struct alpha_node *target, struct alpha_node *content);
 alpha_ret_t alpha_chkdeiter(struct alpha_node *ap);
 
 alpha_ret_t alpha_remdneg(struct alpha_node *ap);
-struct alpha_node *alpha_adddneg(struct alpha_node *ap);
+alpha_ret_t alpha_adddneg(struct alpha_node *ap);
 
 #ifdef __cplusplus
 }
