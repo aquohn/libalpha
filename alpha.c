@@ -103,6 +103,7 @@ alpha_ret_t alpha_paste(struct alpha_node *target,
   if (ret != ALPHA_RET_OK) {
     return ret;
   }
+  /* depth update will be handled by makenode */
   alpha_rehash(target);
   return ret;
 }
@@ -316,17 +317,24 @@ static alpha_ret_t alpha_paste_norehash(struct alpha_node *target,
   }
 
   /* TODO have an outer function delete everything created on failure */
-  struct alpha_node *newnode = alpha_makenode_norehash(target, 
-      content->name, content->type, &ret);
-  if (ret != ALPHA_RET_OK) {
-    ret = ALPHA_RET_FATAL;
-    goto paste_exc;
+  struct alpha_node *newnode = NULL;
+  if (content->type == ALPHA_TYPE_AND) { 
+    /* paste children, not the AND node itself */
+    newnode = target;
+  } else {
+    alpha_makenode_norehash(target, 
+        content->name, content->type, &ret);
+    if (ret != ALPHA_RET_OK) {
+      ret = ALPHA_RET_FATAL;
+      goto paste_exc;
+    }
+    ret = alpha_sibpush(&(target->children), newnode);
+    if (ret != ALPHA_RET_OK) {
+      ret = ALPHA_RET_FATAL;
+      goto paste_exc;
+    }
   }
-  ret = alpha_sibpush(&(target->children), newnode);
-  if (ret != ALPHA_RET_OK) {
-    ret = ALPHA_RET_FATAL;
-    goto paste_exc;
-  }
+
   for (size_t i = 0; i < content->children.num_sibs; ++i) {
     ret = alpha_paste_norehash(newnode, content->children.sibs[i]);
     if (ret != ALPHA_RET_OK) {
